@@ -30,6 +30,6 @@ pub mod q3_26_escrow {
     }
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
-        Ok(())
+        ctx.accounts.refund_and_close_vault()
     }
 }
