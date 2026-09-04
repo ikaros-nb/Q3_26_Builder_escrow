@@ -26,7 +26,7 @@ pub mod q3_26_escrow {
     }
 
     pub fn take(ctx: Context<Take>) -> Result<()> {
-        Ok(())
+        ctx.accounts.take_offer()
     }
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
