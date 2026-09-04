@@ -8,7 +8,8 @@ use anchor_spl::{
 
 use crate::{
     constants::ESCROW_SEED,
-    state::Escrow
+    error::EscrowError,
+    state::Escrow,
 };
 
 #[derive(Accounts)]
@@ -78,6 +79,8 @@ impl<'info> Make<'info> {
     }
 
     pub fn deposit(&mut self, deposit: u64) -> Result<()> {
+        require!(deposit > 0, EscrowError::InvalidAmount);
+
         let cpi_program = self.token_program.key();
         let transfer_accounts = TransferChecked {
             from: self.maker_ata_a.to_account_info(),
