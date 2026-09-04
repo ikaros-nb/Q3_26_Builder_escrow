@@ -15,11 +15,15 @@ declare_id!("F7rM6r4imQypkGyrRnukZfB1iv8YHkPYKUzDSGE85U7A");
 pub mod q3_26_escrow {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        crate::instructions::initialize::handle_initialize(ctx)
+    pub fn make(ctx: Context<Make>) -> Result<()> {
+        Ok(())
     }
 
-    pub fn increment(ctx: Context<Increment>) -> Result<()> {
-        crate::instructions::increment::handle_increment(ctx)
+    pub fn take(ctx: Context<Take>) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        Ok(())
     }
 }
