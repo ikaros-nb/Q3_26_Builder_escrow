@@ -66,6 +66,8 @@ impl<'info> Make<'info> {
         token_b_wanted_amount: u64,
         bumps: &MakeBumps,
     ) -> Result<()> {
+        require!(token_b_wanted_amount > 0, EscrowError::InvalidAmount);
+
         self.escrow.set_inner(Escrow {
             id,
             maker: self.maker.key(),
