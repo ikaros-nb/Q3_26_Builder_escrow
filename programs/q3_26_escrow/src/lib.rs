@@ -19,9 +19,9 @@ pub mod q3_26_escrow {
         ctx: Context<Make>,
         id: u64,
         deposit: u64,
-        mint_b_wanted_amount: u64,
+        token_b_wanted_amount: u64,
     ) -> Result<()> {
-        ctx.accounts.populate_escrow(id, mint_b_wanted_amount, &ctx.bumps)?;
+        ctx.accounts.populate_escrow(id, token_b_wanted_amount, &ctx.bumps)?;
         ctx.accounts.deposit(deposit)
     }
 

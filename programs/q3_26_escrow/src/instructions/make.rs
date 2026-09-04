@@ -62,7 +62,7 @@ impl<'info> Make<'info> {
     pub fn populate_escrow(
         &mut self,
         id: u64,
-        receive: u64,
+        token_b_wanted_amount: u64,
         bumps: &MakeBumps,
     ) -> Result<()> {
         self.escrow.set_inner(Escrow {
@@ -70,7 +70,7 @@ impl<'info> Make<'info> {
             maker: self.maker.key(),
             mint_a: self.mint_a.key(),
             mint_b: self.mint_b.key(),
-            mint_b_wanted_amount: receive,
+            token_b_wanted_amount,
             bump: bumps.escrow,
         });
 
