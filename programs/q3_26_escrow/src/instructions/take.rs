@@ -24,6 +24,7 @@ pub struct Take<'info> {
         close = maker,
         has_one = maker,
         has_one = mint_a,
+        has_one = mint_b,
         seeds = [ESCROW_SEED, maker.key().as_ref(), escrow.id.to_le_bytes().as_ref()],
         bump = escrow.bump,
     )]
