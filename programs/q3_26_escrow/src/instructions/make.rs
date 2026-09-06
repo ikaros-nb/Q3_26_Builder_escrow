@@ -71,7 +71,11 @@ impl<'info> Make<'info> {
         
         let current_time = Clock::get()?.unix_timestamp;
         require!(current_time < expiration, EscrowError::ExpirationInThePast);
-        require!(expiration - current_time <= MAX_ESCROW_DURATION, EscrowError::ExpirationTooFar);
+
+        let max_expiration = current_time
+            .checked_add(MAX_ESCROW_DURATION)
+            .ok_or(EscrowError::ExpirationTooFar)?;
+        require!(expiration <= max_expiration, EscrowError::ExpirationTooFar);
 
         self.escrow.set_inner(Escrow {
             id,

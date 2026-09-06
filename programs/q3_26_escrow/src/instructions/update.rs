@@ -28,7 +28,11 @@ impl<'info> Update<'info> {
         require!(current_time < self.escrow.expiration, EscrowError::OfferExpired);
         require!(current_time < new_expiration, EscrowError::ExpirationInThePast);
         require!(self.escrow.expiration < new_expiration, EscrowError::ExpirationNotExtended);
-        require!(new_expiration - current_time <= MAX_ESCROW_DURATION, EscrowError::ExpirationTooFar);
+
+        let max_expiration = current_time
+            .checked_add(MAX_ESCROW_DURATION)
+            .ok_or(EscrowError::ExpirationTooFar)?;
+        require!(new_expiration <= max_expiration, EscrowError::ExpirationTooFar);
 
         self.escrow.expiration = new_expiration;
 
