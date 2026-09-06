@@ -7,7 +7,7 @@ use anchor_spl::{
 };
 
 use crate::{
-    constants::ESCROW_SEED,
+    constants::{ESCROW_SEED, MAX_ESCROW_DURATION},
     error::EscrowError,
     state::Escrow,
 };
@@ -70,7 +70,8 @@ impl<'info> Make<'info> {
         require!(token_b_wanted_amount > 0, EscrowError::InvalidAmount);
         
         let current_time = Clock::get()?.unix_timestamp;
-        require!(current_time < expiration, EscrowError::ExpirationShorterThanCurrentTime);
+        require!(current_time < expiration, EscrowError::ExpirationInThePast);
+        require!(expiration - current_time <= MAX_ESCROW_DURATION, EscrowError::ExpirationTooFar);
 
         self.escrow.set_inner(Escrow {
             id,

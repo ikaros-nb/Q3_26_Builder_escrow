@@ -1,18 +1,18 @@
 use anchor_lang::prelude::*;
 
 use crate::{
-    constants::ESCROW_SEED,
+    constants::{ESCROW_SEED, MAX_ESCROW_DURATION},
     error::EscrowError,
     state::Escrow,
 };
 
 #[derive(Accounts)]
 pub struct Update<'info> {
-    #[account(mut)]
     pub maker: Signer<'info>,
 
     #[account(
         mut,
+        has_one = maker,
         seeds = [ESCROW_SEED, maker.key().as_ref(), escrow.id.to_le_bytes().as_ref()],
         bump = escrow.bump,
     )]
@@ -24,7 +24,11 @@ impl<'info> Update<'info> {
         &mut self,
         new_expiration: i64,
     ) -> Result<()> {
-        require!(self.escrow.expiration < new_expiration, EscrowError::ExpirationShorterThanCurrent);
+        let current_time = Clock::get()?.unix_timestamp;
+        require!(current_time < self.escrow.expiration, EscrowError::OfferExpired);
+        require!(current_time < new_expiration, EscrowError::ExpirationInThePast);
+        require!(self.escrow.expiration < new_expiration, EscrowError::ExpirationNotExtended);
+        require!(new_expiration - current_time <= MAX_ESCROW_DURATION, EscrowError::ExpirationTooFar);
 
         self.escrow.expiration = new_expiration;
 
