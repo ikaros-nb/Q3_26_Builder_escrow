@@ -11,7 +11,7 @@ use litesvm::{
     LiteSVM,
 };
 use litesvm_token::{
-    get_spl_account, CreateAssociatedTokenAccount, CreateMint, MintTo, spl_token::{ID as TOKEN_PROGRAM_ID, state::Account as TokenAccount},
+    get_spl_account, CreateAssociatedTokenAccount, CreateAssociatedTokenAccountIdempotent, CreateMint, MintTo, spl_token::{ID as TOKEN_PROGRAM_ID, state::Account as TokenAccount},
 };
 use solana_keypair::Keypair;
 use solana_message::Message;
@@ -169,6 +169,32 @@ impl Setup {
         svm.send_transaction(transaction)
     }
 
+    fn refund(&mut self) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let ix = Instruction {
+            program_id: q3_26_escrow::id(),
+            accounts: q3_26_escrow::accounts::Refund {
+                maker: self.maker.pubkey(),
+                mint_a: self.mint_a,
+                maker_ata_a: self.maker_ata_a,
+                escrow: self.escrow,
+                vault: self.vault,
+                token_program: TOKEN_PROGRAM_ID,
+                system_program: SYSTEM_PROGRAM_ID,
+            }
+            .to_account_metas(None),
+            data: q3_26_escrow::instruction::Refund {}.data(),
+        };
+        let Self { svm, maker, .. } = self;
+        let message = Message::new(&[ix], Some(&maker.pubkey()));
+        let recent_blockhash = svm.latest_blockhash();
+        let transaction = Transaction::new(
+            &[&maker],
+            message,
+            recent_blockhash,
+        );
+        svm.send_transaction(transaction)
+    }
+
     fn token_amount(&self, ata: &Pubkey) -> u64 {
         get_spl_account::<TokenAccount>(&self.svm, ata)
             .expect("token account")
@@ -195,6 +221,13 @@ impl Setup {
         let mut clock = self.svm.get_sysvar::<Clock>();
         clock.unix_timestamp = unix_timestamp;
         self.svm.set_sysvar::<Clock>(&clock);
+    }
+
+    fn assert_closed(&self, key: &Pubkey) {
+        match self.svm.get_account(key) {
+            None => {}
+            Some(acc) => assert!(acc.lamports == 0 || acc.data.is_empty()),
+        }
     }
 }
 
@@ -258,6 +291,38 @@ fn test_make_fails_when_expiration_exceeds_max() {
     assert_escrow_error(setup.make(expiration), EscrowError::ExpirationTooFar);
 
     assert_no_state_change(&setup);
+}
+
+#[test]
+fn test_refund() {
+    let mut setup = Setup::new();
+    
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+    setup.warp_to(expiration);
+    setup.refund()
+        .expect("refund should succeed");
+
+    setup.assert_closed(&setup.escrow);
+    setup.assert_closed(&setup.vault);
+    assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY);
+}
+
+#[test]
+fn test_refund_fails_when_offer_is_active() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    setup.warp_to(expiration.saturating_sub(1));
+    assert_escrow_error(setup.refund(), EscrowError::OfferIsActive);
+
+    assert!(setup.escrow_exists(), "escrow should still be open");
+    assert_eq!(setup.token_amount(&setup.vault), DEPOSIT);
+    assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY - DEPOSIT);
 }
 
 fn assert_escrow_error(
