@@ -1,12 +1,15 @@
 use anchor_lang::{
     AccountDeserialize, InstructionData, ToAccountMetas, prelude::{Pubkey, msg}, solana_program::{
-        clock::Clock, instruction::Instruction,
+        clock::Clock, instruction::{Instruction, error::InstructionError},
     }, system_program::ID as SYSTEM_PROGRAM_ID
 };
 use anchor_spl::{
     associated_token::{get_associated_token_address, ID as ASSOCIATED_TOKEN_PROGRAM_ID},
 };
-use litesvm::LiteSVM;
+use litesvm::{
+    types::{FailedTransactionMetadata, TransactionMetadata},
+    LiteSVM,
+};
 use litesvm_token::{
     get_spl_account, CreateAssociatedTokenAccount, CreateMint, MintTo, spl_token::{ID as TOKEN_PROGRAM_ID, state::Account as TokenAccount},
 };
@@ -14,12 +17,17 @@ use solana_keypair::Keypair;
 use solana_message::Message;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
+use q3_26_escrow::{error::EscrowError, MAX_ESCROW_DURATION};
 
 const SEED: u64 = 42;
 const SUPPLY: u64 = 1_000_000_000;
 const DEPOSIT: u64 = 1_000_000;
 const RECEIVE: u64 = 1_000_000;
 const TEN_DAYS: i64 = 864_000; // 10 days in seconds, well under MAX_ESCROW_DURATION (30 days)
+// A plausible wall-clock timestamp. LiteSVM starts the Clock sysvar at 0, which would make
+// "now - 10 days" a negative unix timestamp — an input no real cluster can produce.
+const START_TIMESTAMP: i64 = 1_788_683_523;
 
 struct Setup {
     svm: LiteSVM,
@@ -107,7 +115,7 @@ impl Setup {
         let vault = get_associated_token_address(&escrow, &mint_a);
         msg!("Vault: {}\n", vault);
 
-        Self {
+        let mut setup = Self {
             svm,
             maker,
             taker,
@@ -119,10 +127,15 @@ impl Setup {
             taker_ata_b,
             escrow,
             vault,
-        }
+        };
+
+        // Every test runs on a plausible clock rather than LiteSVM's default of 0.
+        setup.warp_to(START_TIMESTAMP);
+
+        setup
     }
 
-    fn make(&mut self, expiration: i64) {
+    fn make(&mut self, expiration: i64) -> Result<TransactionMetadata, FailedTransactionMetadata> {
         let ix = Instruction {
             program_id: q3_26_escrow::id(),
             accounts: q3_26_escrow::accounts::Make {
@@ -153,11 +166,7 @@ impl Setup {
             message,
             recent_blockhash,
         );
-        let tx = svm.send_transaction(transaction).unwrap();
-
-        msg!("\n\nMake transaction sucessfull");
-        msg!("CUs Consumed: {}", tx.compute_units_consumed);
-        msg!("Tx Signature: {}", tx.signature);
+        svm.send_transaction(transaction)
     }
 
     fn token_amount(&self, ata: &Pubkey) -> u64 {
@@ -172,18 +181,35 @@ impl Setup {
         q3_26_escrow::state::Escrow::try_deserialize(&mut data).unwrap()
     }
 
+    fn escrow_exists(&self) -> bool {
+        self.svm
+            .get_account(&self.escrow)
+            .is_some_and(|account| account.lamports > 0)
+    }
+
     fn now(&self) -> i64 {
         self.svm.get_sysvar::<Clock>().unix_timestamp
+    }
+
+    fn warp_to(&mut self, unix_timestamp: i64) {
+        let mut clock = self.svm.get_sysvar::<Clock>();
+        clock.unix_timestamp = unix_timestamp;
+        self.svm.set_sysvar::<Clock>(&clock);
     }
 }
 
 #[test]
-fn test_make_succeeds_with_future_expiration() {
+fn test_make() {
     let mut setup = Setup::new();
     assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY);
 
     let expiration = setup.now().saturating_add(TEN_DAYS);
-    setup.make(expiration);
+    let transaction = setup.make(expiration)
+        .expect("make should succeed");
+
+    msg!("\n\nMake transaction sucessfull");
+    msg!("CUs Consumed: {}", transaction.compute_units_consumed);
+    msg!("Tx Signature: {}", transaction.signature);
 
     let escrow = setup.escrow_state();
     assert_eq!((escrow.id, escrow.token_b_wanted_amount), (SEED, RECEIVE));
@@ -191,4 +217,63 @@ fn test_make_succeeds_with_future_expiration() {
     assert_eq!(escrow.maker, setup.maker.pubkey());
     assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY - DEPOSIT);
     assert_eq!(setup.token_amount(&setup.vault), DEPOSIT);
+}
+
+#[test]
+fn test_make_succeeds_at_max_expiration() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(MAX_ESCROW_DURATION);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    assert_eq!(setup.escrow_state().expiration, expiration);
+}
+
+#[test]
+fn test_make_fails_when_expiration_in_the_past() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_sub(TEN_DAYS);
+    assert_escrow_error(setup.make(expiration), EscrowError::ExpirationInThePast);
+
+    assert_no_state_change(&setup);
+}
+
+#[test]
+fn test_make_fails_when_expiration_equals_now() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now();
+    assert_escrow_error(setup.make(expiration), EscrowError::ExpirationInThePast);
+
+    assert_no_state_change(&setup);
+}
+
+#[test]
+fn test_make_fails_when_expiration_exceeds_max() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(MAX_ESCROW_DURATION).saturating_add(1);
+    assert_escrow_error(setup.make(expiration), EscrowError::ExpirationTooFar);
+
+    assert_no_state_change(&setup);
+}
+
+fn assert_escrow_error(
+    result: Result<TransactionMetadata, FailedTransactionMetadata>,
+    expected: EscrowError,
+) {
+    let failure = result.expect_err("transaction should have failed");
+    assert_eq!(
+        failure.err,
+        TransactionError::InstructionError(0, InstructionError::Custom(u32::from(expected))),
+        "logs: {:#?}",
+        failure.meta.logs,
+    );
+}
+
+fn assert_no_state_change(setup: &Setup) {
+    assert!(!setup.escrow_exists(), "escrow account should not have been created");
+    assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY);
 }
