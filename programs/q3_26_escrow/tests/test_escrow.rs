@@ -195,6 +195,57 @@ impl Setup {
         svm.send_transaction(transaction)
     }
 
+    fn create_destination_atas(&mut self) {
+        let taker_pk = self.taker.pubkey();
+        let maker_pk = self.maker.pubkey();
+        let (mint_a, mint_b) = (self.mint_a, self.mint_b);
+
+        CreateAssociatedTokenAccountIdempotent::new(&mut self.svm, &self.taker, &mint_a)
+            .owner(&taker_pk)
+            .send()
+            .unwrap();
+        CreateAssociatedTokenAccountIdempotent::new(&mut self.svm, &self.taker, &mint_b)
+            .owner(&maker_pk)
+            .send()
+            .unwrap();
+    }
+
+    fn take(&mut self) -> Result<TransactionMetadata, FailedTransactionMetadata> {
+        let taker_pk = self.taker.pubkey();
+        let maker_pk = self.maker.pubkey();
+        let mint_a = self.mint_a;
+        let mint_b = self.mint_b;
+
+        let ix = Instruction {
+            program_id: q3_26_escrow::id(),
+            accounts: q3_26_escrow::accounts::Take {
+                maker: maker_pk,
+                taker: taker_pk,
+                mint_a,
+                mint_b,
+                taker_ata_a: self.taker_ata_a,
+                taker_ata_b: self.taker_ata_b,
+                maker_ata_b: self.maker_ata_b,
+                escrow: self.escrow,
+                vault: self.vault,
+                associated_token_program: ASSOCIATED_TOKEN_PROGRAM_ID,
+                token_program: TOKEN_PROGRAM_ID,
+                system_program: SYSTEM_PROGRAM_ID,
+            }
+            .to_account_metas(None),
+            data: q3_26_escrow::instruction::Take {}.data(),
+        };
+        let Self { svm, taker, .. } = self;
+        let message = Message::new(&[ix], Some(&taker.pubkey()));
+        let recent_blockhash = svm.latest_blockhash();
+        let transaction = Transaction::new(
+            &[&taker],
+            message,
+            recent_blockhash,
+        );
+        svm.send_transaction(transaction)
+    }
+
     fn token_amount(&self, ata: &Pubkey) -> u64 {
         get_spl_account::<TokenAccount>(&self.svm, ata)
             .expect("token account")
@@ -325,6 +376,70 @@ fn test_refund_fails_when_offer_is_active() {
     assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY - DEPOSIT);
 }
 
+#[test]
+fn test_take() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    setup.take()
+        .expect("take should succeed");
+
+    assert_take_settled(&setup);
+}
+
+#[test]
+fn test_take_succeeds_when_destination_atas_exist() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    setup.create_destination_atas();
+    setup.take()
+        .expect("take should succeed");
+
+    assert_take_settled(&setup);
+}
+
+#[test]
+fn test_take_succeeds_just_before_expiration() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    setup.warp_to(expiration.saturating_sub(1));
+    setup.take()
+        .expect("take should succeed one second before expiration");
+
+    assert_take_settled(&setup);
+}
+
+#[test]
+fn test_take_fails_when_offer_has_expired() {
+    let mut setup = Setup::new();
+
+    let expiration = setup.now().saturating_add(TEN_DAYS);
+    setup.make(expiration)
+        .expect("make should succeed");
+
+    setup.create_destination_atas();
+    setup.warp_to(expiration);
+    assert_escrow_error(setup.take(), EscrowError::OfferExpired);
+
+    assert!(setup.escrow_exists(), "escrow should still be open");
+    assert_eq!(setup.token_amount(&setup.vault), DEPOSIT);
+    assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY - DEPOSIT);
+    assert_eq!(setup.token_amount(&setup.taker_ata_a), 0);
+    assert_eq!(setup.token_amount(&setup.taker_ata_b), SUPPLY);
+    assert_eq!(setup.token_amount(&setup.maker_ata_b), 0);
+}
+
 fn assert_escrow_error(
     result: Result<TransactionMetadata, FailedTransactionMetadata>,
     expected: EscrowError,
@@ -336,6 +451,15 @@ fn assert_escrow_error(
         "logs: {:#?}",
         failure.meta.logs,
     );
+}
+
+fn assert_take_settled(setup: &Setup) {
+    setup.assert_closed(&setup.escrow);
+    setup.assert_closed(&setup.vault);
+    assert_eq!(setup.token_amount(&setup.maker_ata_a), SUPPLY - DEPOSIT);
+    assert_eq!(setup.token_amount(&setup.taker_ata_a), DEPOSIT);
+    assert_eq!(setup.token_amount(&setup.taker_ata_b), SUPPLY - RECEIVE);
+    assert_eq!(setup.token_amount(&setup.maker_ata_b), RECEIVE);
 }
 
 fn assert_no_state_change(setup: &Setup) {
