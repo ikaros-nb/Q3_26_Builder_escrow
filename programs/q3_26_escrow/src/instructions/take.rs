@@ -48,7 +48,7 @@ pub struct Take<'info> {
         associated_token::authority = taker,
         associated_token::token_program = token_program
     )]
-    pub taker_ata_a: InterfaceAccount<'info, TokenAccount>,
+    pub taker_ata_a: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -56,7 +56,7 @@ pub struct Take<'info> {
         associated_token::authority = taker,
         associated_token::token_program = token_program
     )]
-    pub taker_ata_b: InterfaceAccount<'info, TokenAccount>,
+    pub taker_ata_b: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -65,7 +65,7 @@ pub struct Take<'info> {
         associated_token::authority = maker,
         associated_token::token_program = token_program
     )]
-    pub maker_ata_b: InterfaceAccount<'info, TokenAccount>,
+    pub maker_ata_b: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -73,7 +73,7 @@ pub struct Take<'info> {
         associated_token::authority = escrow,
         associated_token::token_program = token_program,
     )]
-    pub vault: InterfaceAccount<'info, TokenAccount>,
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub token_program: Interface<'info, TokenInterface>,
