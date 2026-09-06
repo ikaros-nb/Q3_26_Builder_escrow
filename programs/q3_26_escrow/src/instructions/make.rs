@@ -65,8 +65,12 @@ impl<'info> Make<'info> {
         id: u64,
         token_b_wanted_amount: u64,
         bumps: &MakeBumps,
+        expiration: i64,
     ) -> Result<()> {
         require!(token_b_wanted_amount > 0, EscrowError::InvalidAmount);
+        
+        let current_time = Clock::get()?.unix_timestamp;
+        require!(current_time < expiration, EscrowError::ExpirationShorterThanCurrentTime);
 
         self.escrow.set_inner(Escrow {
             id,
@@ -75,6 +79,7 @@ impl<'info> Make<'info> {
             mint_b: self.mint_b.key(),
             token_b_wanted_amount,
             bump: bumps.escrow,
+            expiration,
         });
 
         Ok(())

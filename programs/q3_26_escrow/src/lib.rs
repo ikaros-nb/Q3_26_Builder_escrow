@@ -20,8 +20,9 @@ pub mod q3_26_escrow {
         id: u64,
         deposit: u64,
         token_b_wanted_amount: u64,
+        expiration: i64,
     ) -> Result<()> {
-        ctx.accounts.populate_escrow(id, token_b_wanted_amount, &ctx.bumps)?;
+        ctx.accounts.populate_escrow(id, token_b_wanted_amount, &ctx.bumps, expiration)?;
         ctx.accounts.deposit(deposit)
     }
 
@@ -31,5 +32,9 @@ pub mod q3_26_escrow {
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         ctx.accounts.refund_and_close_vault()
+    }
+
+    pub fn update(ctx: Context<Update>, expiration: i64) -> Result<()> {
+        ctx.accounts.update_escrow(expiration)
     }
 }

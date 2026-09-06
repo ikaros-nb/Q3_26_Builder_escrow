@@ -8,7 +8,8 @@ use anchor_spl::{
 
 use crate::{
     constants::ESCROW_SEED,
-    state::Escrow
+    error::EscrowError,
+    state::Escrow,
 };
 
 #[derive(Accounts)]
@@ -81,6 +82,9 @@ pub struct Take<'info> {
 
 impl<'info> Take<'info> {
     pub fn take_offer(&mut self) -> Result<()> {
+        let current_time = Clock::get()?.unix_timestamp;
+        require!(current_time < self.escrow.expiration, EscrowError::OfferExpired);
+
         // taker sends token B to maker
         let cpi_program = self.token_program.key();
         let transfer_accounts = TransferChecked {

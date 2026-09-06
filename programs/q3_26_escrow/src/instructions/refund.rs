@@ -5,7 +5,8 @@ use anchor_spl::token_interface::{
 
 use crate::{
     constants::ESCROW_SEED,
-    state::Escrow
+    error::EscrowError,
+    state::Escrow,
 };
 
 #[derive(Accounts)]
@@ -50,6 +51,9 @@ pub struct Refund<'info> {
 
 impl<'info> Refund<'info> {
     pub fn refund_and_close_vault(&mut self) -> Result<()> {
+        let current_time = Clock::get()?.unix_timestamp;
+        require!(current_time >= self.escrow.expiration, EscrowError::OfferIsActive);
+
         let cpi_program = self.token_program.key();
         let cpi_accounts = TransferChecked {
             from: self.vault.to_account_info(),

@@ -9,4 +9,5 @@ pub struct Escrow {
     pub mint_b: Pubkey,
     pub token_b_wanted_amount: u64,
     pub bump: u8,
+    pub expiration: i64,
 }
